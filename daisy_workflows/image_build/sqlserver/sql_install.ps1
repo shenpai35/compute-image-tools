@@ -296,18 +296,55 @@ function Install-SSMS {
     Write-Host "Not installing SSMS for config ${sql_server_config}"
     return
   }
-  Write-Host 'Installing SSMS'
+  
+  Write-Host 'Installing SSMS from layout'
+  
+  # Temporary directory to stage the zip file 
+  $SSMS_SOURCE_ZIP = "C:\SSMS_Installer.zip"
 
-  $gs_path = Get-MetadataValue -key 'daisy-sources-path'
-  $ssms_exe = "${script:sbom_dir}\SSMS-Setup-ENU.exe"
-  & 'gsutil' -m cp "${gs_path}/SSMS-Setup-ENU.exe" $ssms_exe
+  # Temporary directory to stage the installation files
+  $SSMS_DEST_DIR = "C:\SSMS_Installer"
 
-  $process = Start-Process $ssms_exe -ArgumentList @('/install','/quiet','/norestart') -Passthru -Wait
-  if ($process.ExitCode -ne 0) {
-    throw "SSMS installer returned non-zero exit code. Exit Code: $($process.ExitCode)"
+  # Path to the installer executable within the staged directory
+  $SSMS_INSTALLER_EXE = Join-Path $SSMS_DEST_DIR "SSMS_Layout\vs_SSMS.exe"
+
+  Write-Host "Creating destination directory: $SSMS_DEST_DIR"
+  New-Item -ItemType Directory -Force -Path $SSMS_DEST_DIR
+ 
+  # Downloading zip file 
+  $SSMS_GCS_PATH = Get-MetadataValue -key 'daisy-sources-path'
+  Write-Host "Downloading SSMS installer from $SSMS_GCS_PATH to $SSMS_SOURCE_ZIP"
+  & 'gcloud' storage cp $SSMS_GCS_PATH $SSMS_SOURCE_ZIP
+  
+  Write-Host "Extracting SSMS Installer ZIP from $SSMS_SOURCE_ZIP to $SSMS_DEST_DIR"
+  Expand-Archive -Path $SSMS_SOURCE_ZIP -DestinationPath $SSMS_DEST_DIR -Force
+
+  Write-Host "Starting SSMS installation: $SSMS_INSTALLER_EXE"
+  
+  # Arguments for silent installation
+  $ARGUMENTS = @(
+    "--noWeb",
+    "--quiet",
+    "--norestart"
+  )
+
+  Write-Host "Arguments: $ARGUMENTS"
+  $process = Start-Process $SSMS_INSTALLER_EXE -ArgumentList $ARGUMENTS -Passthru -Wait -ErrorAction Stop
+
+  if ($process.ExitCode -ne 0 -and $process.ExitCode -ne 3010) {
+    throw "SSMS installer returned a failure code: $($process.ExitCode)"
   }
 
-  Write-Host 'Finished installing SSMS'
+  Write-Host "SSMS Installation process exited with code: $($process.ExitCode)"
+
+  Write-Host "Cleaning up temporary directory: $SSMS_DEST_DIR"
+  Remove-Item -Path $SSMS_DEST_DIR -Recurse -Force
+
+  # Clean up the installer ZIP file 
+  Write-Host "Cleaning up source ZIP: $SSMS_SOURCE_ZIP"
+  Remove-Item -Path $SSMS_SOURCE_ZIP -Force
+
+  Write-Host "Finished installing SSMS function. Exit code: $($process.ExitCode)"
 }
 
 function Enable-MicrosoftUpdate {
